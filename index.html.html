@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tic‑Tac‑Toe — Single File</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#10b981;--muted:#94a3b8;--x:#ef4444;--o:#3b82f6}
+    html,body{height:100%;margin:0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,#031025 0%, #071428 100%);color:#e6eef8}
+    .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:20px;border-radius:12px;box-shadow:0 6px 30px rgba(2,6,23,0.6);width:360px;max-width:95%}
+
+    h1{font-size:18px;margin:0 0 8px}
+    .meta{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .meta small{color:var(--muted)}
+
+    .controls{display:flex;gap:8px;margin-bottom:12px}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:inherit;cursor:pointer}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),#06b6d4);border:none;color:#041024}
+
+    .board{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+    .cell{aspect-ratio:1/1;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));display:flex;align-items:center;justify-content:center;font-size:44px;border-radius:8px;cursor:pointer;user-select:none}
+    .cell.disabled{cursor:not-allowed;opacity:0.75}
+    .status{min-height:24px;color:var(--muted);font-size:14px}
+
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:var(--muted);font-size:13px}
+
+    /* highlight win line */
+    .win{background:linear-gradient(90deg,rgba(16,185,129,0.12),rgba(6,182,212,0.06));box-shadow:0 8px 30px rgba(16,185,129,0.06) inset}
+
+    @media (max-width:420px){.card{width:320px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" role="application" aria-label="Tic tac toe game">
+      <div class="meta">
+        <h1>Tic‑Tac‑Toe</h1>
+        <small>Classic 3×3</small>
+      </div>
+
+      <div class="controls">
+        <button id="restart" class="btn">Restart</button>
+        <button id="toggle-mode" class="btn">Mode: 2‑Player</button>
+        <button id="undo" class="btn">Undo</button>
+      </div>
+
+      <div id="board" class="board" aria-live="polite"></div>
+
+      <div class="status" id="status">X to move</div>
+
+      <div class="footer">
+        <div>Turn: <strong id="turn">X</strong></div>
+        <div>Made with ♥</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Single-file Tic-Tac-Toe with 2-player and vs-computer (Minimax) modes
+    const boardEl = document.getElementById('board');
+    const statusEl = document.getElementById('status');
+    const turnEl = document.getElementById('turn');
+    const restartBtn = document.getElementById('restart');
+    const toggleBtn = document.getElementById('toggle-mode');
+    const undoBtn = document.getElementById('undo');
+
+    let board = Array(9).fill(null); // null | 'X' | 'O'
+    let xTurn = true;
+    let gameOver = false;
+    let vsComputer = false; // toggle
+    let history = []; // for undo
+
+    const lines = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+
+    function render(){
+      boardEl.innerHTML = '';
+      board.forEach((val,i)=>{
+        const cell = document.createElement('div');
+        cell.className = 'cell' + (val? ' disabled' : '');
+        cell.setAttribute('role','button');
+        cell.setAttribute('aria-label', val ? val + ' at ' + i : 'empty');
+        cell.dataset.index = i;
+        cell.innerHTML = val ? (val === 'X' ? '<span style="color:'+getComputedStyle(document.documentElement).getPropertyValue('--x')+'">X</span>' : '<span style="color:'+getComputedStyle(document.documentElement).getPropertyValue('--o')+'">O</span>') : '';
+        if(!gameOver && !val) cell.addEventListener('click', onCellClick);
+        boardEl.appendChild(cell);
+      });
+
+      const winner = checkWinner(board);
+      if(winner){
+        gameOver = true;
+        highlightWin(winner.line);
+        statusEl.textContent = winner.player === 'draw' ? "It's a draw!" : `${winner.player} wins!`;
+        turnEl.textContent = '-';
+      } else {
+        statusEl.textContent = `${xTurn ? 'X' : 'O'} to move`;
+        turnEl.textContent = xTurn ? 'X' : 'O';
+      }
+    }
+
+    function onCellClick(e){
+      const i = Number(e.currentTarget.dataset.index);
+      if(gameOver || board[i]) return;
+      makeMove(i, xTurn ? 'X' : 'O');
+
+      if(!gameOver && vsComputer && !xTurn){
+        // computer as O (plays when xTurn is false)
+        // run a short timeout for feel
+        setTimeout(()=>{
+          const aiMove = bestMove(board);
+          if(aiMove !== null) makeMove(aiMove, 'O');
+        }, 220);
+      }
+    }
+
+    function makeMove(i, player){
+      history.push(board.slice());
+      board[i] = player;
+      xTurn = !xTurn;
+      render();
+    }
+
+    function highlightWin(line){
+      if(!line) return;
+      line.forEach(idx=>{
+        const cell = boardEl.querySelector(`.cell[data-index='${idx}']`);
+        if(cell) cell.classList.add('win');
+      });
+    }
+
+    function checkWinner(bd){
+      for(const l of lines){
+        const [a,b,c] = l;
+        if(bd[a] && bd[a] === bd[b] && bd[a] === bd[c]){
+          return {player: bd[a], line: l};
+        }
+      }
+      if(bd.every(Boolean)) return {player:'draw', line:null};
+      return null;
+    }
+
+    restartBtn.addEventListener('click', ()=>{
+      board = Array(9).fill(null);
+      xTurn = true;
+      gameOver = false;
+      history = [];
+      render();
+    });
+
+    toggleBtn.addEventListener('click', ()=>{
+      vsComputer = !vsComputer;
+      toggleBtn.textContent = vsComputer ? 'Mode: vs Computer' : 'Mode: 2‑Player';
+      // if switching to vsComputer and it's O's turn, make computer move
+      if(vsComputer && !xTurn && !gameOver){
+        setTimeout(()=>{
+          const aiMove = bestMove(board);
+          if(aiMove !== null) makeMove(aiMove, 'O');
+        }, 250);
+      }
+    });
+
+    undoBtn.addEventListener('click', ()=>{
+      if(history.length === 0 || gameOver) return;
+      board = history.pop();
+      xTurn = board.filter(x=>x!==null).length % 2 === 0; // recalc whose turn
+      gameOver = false;
+      render();
+    });
+
+    // --- AI (Minimax) ---
+    function bestMove(bd){
+      // computer always plays 'O' here
+      // if first move for computer and center free, take center
+      if(bd.every(v=>v===null)) return 4; // center
+
+      const available = bd.map((v,i)=>v?null:i).filter(v=>v!==null);
+      let bestScore = -Infinity;
+      let move = null;
+      for(const i of available){
+        bd[i] = 'O';
+        const score = minimax(bd, 0, false);
+        bd[i] = null;
+        if(score > bestScore){ bestScore = score; move = i; }
+      }
+      return move;
+    }
+
+    function minimax(bd, depth, isMaximizing){
+      const result = checkWinner(bd);
+      if(result){
+        if(result.player === 'O') return 10 - depth;
+        if(result.player === 'X') return depth - 10;
+        return 0; // draw
+      }
+
+      const avail = bd.map((v,i)=>v?null:i).filter(v=>v!==null);
+      if(isMaximizing){
+        let best = -Infinity;
+        for(const i of avail){
+          bd[i] = 'O';
+          best = Math.max(best, minimax(bd, depth+1, false));
+          bd[i] = null;
+        }
+        return best;
+      } else {
+        let best = Infinity;
+        for(const i of avail){
+          bd[i] = 'X';
+          best = Math.min(best, minimax(bd, depth+1, true));
+          bd[i] = null;
+        }
+        return best;
+      }
+    }
+
+    // init
+    render();
+  </script>
+</body>
+</html>
